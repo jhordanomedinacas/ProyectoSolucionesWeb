@@ -32320,1294 +32320,741 @@ class RGBELoader extends HDRLoader {
     super(manager);
   }
 }
+const CHATBOT_API_URL = "http://localhost:8000";
 class HeadBot extends HTMLElement {
   connectedCallback() {
     const canvas = document.createElement("canvas");
     canvas.id = "headbot-canvas";
-    canvas.style.position = "fixed";
-    canvas.style.bottom = "-100px";
-    canvas.style.right = "-60px";
-    canvas.style.width = "300px";
-    canvas.style.height = "300px";
-    canvas.style.pointerEvents = "none"; // Cambio: el canvas ya no recibe clicks
-    canvas.style.zIndex = "9999";
-    canvas.style.background = "transparent";
+    canvas.style.cssText = `
+      position: fixed; bottom: -100px; right: -60px;
+      width: 300px; height: 300px;
+      pointer-events: none; z-index: 9999;
+      background: transparent;
+    `;
     this.appendChild(canvas);
-    
-    // Área circular de click sobre el canvas
+ 
+    // Área circular de click
     const clickArea = document.createElement("div");
     clickArea.id = "headbot-clickarea";
-    clickArea.style.position = "fixed";
-    clickArea.style.bottom = "40px";
-    clickArea.style.right = "50px";
-    clickArea.style.width = "70px";
-    clickArea.style.height = "70px";
-    clickArea.style.borderRadius = "50%";
-    clickArea.style.cursor = "pointer";
-    clickArea.style.zIndex = "10000";
-    clickArea.style.border = "none";
-    clickArea.style.pointerEvents = "auto";
+    clickArea.style.cssText = `
+      position: fixed; bottom: 40px; right: 50px;
+      width: 70px; height: 70px;
+      border-radius: 50%; cursor: pointer;
+      z-index: 10000; border: none; pointer-events: auto;
+    `;
     this.appendChild(clickArea);
-    
-    // ===== NUEVO: Evento de clic =====
-    clickArea.addEventListener('click', () => {
-      this.dispatchEvent(new CustomEvent('headbot-click', { bubbles: true }));
+ 
+    clickArea.addEventListener("click", () => {
+      this.dispatchEvent(new CustomEvent("headbot-click", { bubbles: true }));
     });
-    const scene = new Scene();
-    const camera = new PerspectiveCamera(50, 1, 0.1, 1e3);
+ 
+    // ── Three.js ──
+    const scene    = new Scene();
+    const camera   = new PerspectiveCamera(50, 1, 0.1, 1e3);
     camera.position.set(0, 0, 2);
     const renderer = new WebGLRenderer({ canvas, alpha: true, antialias: true });
     renderer.setSize(300, 300);
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.outputColorSpace = SRGBColorSpace;
-    renderer.toneMapping = ACESFilmicToneMapping;
+    renderer.toneMapping      = ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
-    scene.add(new AmbientLight(16777215, 0.6));
-    const keyLight = new DirectionalLight(16777215, 1.5);
+ 
+    scene.add(new AmbientLight(0xffffff, 0.6));
+    const keyLight = new DirectionalLight(0xffffff, 1.5);
     keyLight.position.set(5, 5, 5);
     scene.add(keyLight);
-    const fillLight = new PointLight(16777215, 1);
+    const fillLight = new PointLight(0xffffff, 1);
     fillLight.position.set(0, 2, 2);
     scene.add(fillLight);
-    const hemiLight = new HemisphereLight(16777215, 4473924, 0.6);
-    scene.add(hemiLight);
-    new RGBELoader().setPath("https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/").load("sunset_fairway_1k.hdr", (texture) => {
-      texture.mapping = EquirectangularReflectionMapping;
-      scene.environment = texture;
-    });
+    scene.add(new HemisphereLight(0xffffff, 0x444444, 0.6));
+ 
+    new RGBELoader()
+      .setPath("https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/")
+      .load("sunset_fairway_1k.hdr", (texture) => {
+        texture.mapping = EquirectangularReflectionMapping;
+        scene.environment = texture;
+      });
+ 
     const loader = new GLTFLoader();
     let head;
-    loader.load(
-      "./cabezareconstruida.glb",
-      (gltf) => {
-        head = gltf.scene;
-        head.scale.set(1.5, 1.5, 1.5); // tamaño más natural
-        scene.add(head);
-      }
-    );
-    let mouseX = 0, mouseY = 0;
-    window.addEventListener("mousemove", (e) => {
-      mouseX = e.clientX / window.innerWidth * 2 - 1;
-      mouseY = e.clientY / window.innerHeight * 2 - 1;
+    loader.load("./cabezareconstruida.glb", (gltf) => {
+      head = gltf.scene;
+      head.scale.set(1.5, 1.5, 1.5);
+      scene.add(head);
     });
+ 
+    let mouseX = 0, mouseY = 0;
+    const _mouseMoveHandler = (e) => {
+      mouseX = (e.clientX / window.innerWidth)  * 2 - 1;
+      mouseY = (e.clientY / window.innerHeight) * 2 - 1;
+    };
+    window.addEventListener("mousemove", _mouseMoveHandler);
+    window._headBotMouseMoveHandler = _mouseMoveHandler;
+ 
+    let _rafId;
     const animate = () => {
-      requestAnimationFrame(animate);
+      _rafId = requestAnimationFrame(animate);
+      window._headBotRafId = _rafId;
       if (head) {
-        const maxRotationY = 0.6, minRotationY = -1.2;
-        const maxRotationX = 0.3, minRotationX = -0.6;
-        const rotationFactorY = 1.5;
-        const rotationFactorX = 0.8;
-        const targetY = mouseX * rotationFactorY;
-        const targetX = mouseY * rotationFactorX;
-        const clampedY = Math.max(minRotationY, Math.min(maxRotationY, targetY));
-        const clampedX = Math.max(minRotationX, Math.min(maxRotationX, targetX));
-        head.rotation.y += (clampedY - head.rotation.y) * 0.1;
-        head.rotation.x += (clampedX - head.rotation.x) * 0.1;
+        const tY = Math.max(-1.2, Math.min(0.6,  mouseX * 1.5));
+        const tX = Math.max(-0.6, Math.min(0.3,  mouseY * 0.8));
+        head.rotation.y += (tY - head.rotation.y) * 0.1;
+        head.rotation.x += (tX - head.rotation.x) * 0.1;
       }
       renderer.render(scene, camera);
     };
     animate();
+    window._headBotRenderer = renderer;
   }
 }
+ 
 if (!customElements.get("head-bot")) {
   customElements.define("head-bot", HeadBot);
 }
-
-// ========== INIT FUNCTION (llamar manualmente desde Angular) ==========
-window.initHeadBot = function() {
-  // Evitar doble inicialización
-  if (document.getElementById('headbot-canvas')) return;
-
+ 
+ 
+// =====================================================================
+//  INIT (llamar desde Angular)
+// =====================================================================
+window.initHeadBot = function () {
+  if (document.getElementById("headbot-canvas")) return;
+ 
   const bot = document.createElement("head-bot");
   document.body.appendChild(bot);
-
-// ========== CHATBOT WIDGET ==========
-(function() {
-    'use strict';
-
-    // Estilos del chatbot
+ 
+  // ── CHATBOT WIDGET ──────────────────────────────────────────────
+  (function () {
+    "use strict";
+ 
+    // ── Estilos ──────────────────────────────────────────────────
     const styles = `
-        .cgpvp-chatbot-container {
-            position: fixed;
-            bottom: 0;
-            right: 0;
-            z-index: 9998;
-            font-family: 'Inter', sans-serif;
-        }
-
-        /* Ventana del chat — estilo modal Corredor Azul */
+      .cgpvp-chatbot-container {
+        position: fixed; bottom: 0; right: 0; z-index: 9998;
+        font-family: 'Inter', sans-serif;
+      }
+      .cgpvp-chat-window {
+        position: fixed; bottom: 130px; right: 70px;
+        width: min(380px, calc(100vw - 40px));
+        height: min(540px, calc(100vh - 180px));
+        background: #ffffff; border-radius: 20px;
+        box-shadow: 0 8px 40px rgba(35,102,206,0.18), 0 2px 8px rgba(0,0,0,0.08);
+        display: none; flex-direction: column; overflow: hidden;
+        animation: slideUp 0.32s cubic-bezier(0.4,0,0.2,1);
+      }
+      .cgpvp-chat-window.open { display: flex; }
+      @keyframes slideUp {
+        from { opacity:0; transform: translateY(20px) scale(0.97); }
+        to   { opacity:1; transform: translateY(0)    scale(1);    }
+      }
+      .cgpvp-chat-header {
+        background: #ffffff; color: #111827;
+        padding: 16px 18px;
+        display: flex; align-items: center; gap: 12px;
+        position: relative; flex-shrink: 0;
+      }
+      .cgpvp-chat-header::after {
+        content: ''; position: absolute; bottom:0; left:0; right:0; height:3px;
+        background: linear-gradient(90deg,#0f1f6e 0%,#2366CE 50%,#3b82f6 100%);
+      }
+      .cgpvp-chat-header-avatar {
+        width: 64px; height: 64px; object-fit: contain; flex-shrink: 0;
+      }
+      .cgpvp-chat-header-info { flex: 1; }
+      .cgpvp-chat-header-title {
+        font-weight: 700; font-size: 14px; letter-spacing: -0.01em;
+        margin: 0 0 2px 0; color: #111827;
+      }
+      .cgpvp-chat-header-status {
+        font-size: 11px; color: #6b7280;
+        display: flex; align-items: center; gap: 5px;
+      }
+      .cgpvp-chat-header-status::before {
+        content: ''; width: 7px; height: 7px;
+        background: #22c55e; border-radius: 50%; display: inline-block;
+      }
+      .cgpvp-chat-tts {
+        background: none; border: none; cursor: pointer;
+        color: #93c5fd; padding: 4px; border-radius: 6px; margin-right: 4px;
+        display: flex; align-items: center; justify-content: center;
+        transition: color 0.18s, background 0.18s; flex-shrink: 0;
+      }
+      .cgpvp-chat-tts:hover { color: #fff; background: rgba(255,255,255,0.15); }
+      .cgpvp-chat-tts.tts-off { color: rgba(255,255,255,0.3); }
+      .cgpvp-chat-tts.tts-off:hover { color: #fff; }
+      .cgpvp-chat-close {
+        background: #f1f5f9; border: none; color: #6b7280;
+        font-size: 16px; cursor: pointer;
+        width: 30px; height: 30px; border-radius: 8px;
+        display: flex; align-items: center; justify-content: center;
+        transition: background 0.2s;
+      }
+      .cgpvp-chat-close:hover { background: #e5e7eb; }
+      .cgpvp-chat-messages {
+        flex: 1; padding: 16px; overflow-y: auto;
+        background: #f8fafc; display: flex; flex-direction: column; gap: 10px;
+      }
+      .cgpvp-chat-messages::-webkit-scrollbar { width: 4px; }
+      .cgpvp-chat-messages::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 4px; }
+      .cgpvp-message { animation: fadeInMessage 0.25s cubic-bezier(0.4,0,0.2,1); }
+      @keyframes fadeInMessage {
+        from { opacity:0; transform: translateY(8px); }
+        to   { opacity:1; transform: translateY(0);   }
+      }
+      .cgpvp-message-bot { display: flex; gap: 8px; align-items: flex-end; }
+      .cgpvp-message-bot-avatar {
+        width: 28px; height: 28px; border-radius: 8px;
+        background: #fff; flex-shrink: 0; object-fit: contain;
+        padding: 3px; box-sizing: border-box; border: 1px solid #e5e7eb;
+      }
+      .cgpvp-message-bot-content {
+        background: #fff; padding: 10px 14px;
+        border-radius: 16px; border-bottom-left-radius: 4px;
+        max-width: 78%;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.07); border: 1px solid #e5e7eb;
+      }
+      .cgpvp-message-bot-content p {
+        margin: 0; color: #111827; line-height: 1.55; font-size: 13px;
+      }
+      .cgpvp-message-user { display: flex; justify-content: flex-end; }
+      .cgpvp-message-user-content {
+        background: linear-gradient(135deg,#1a3a8f 0%,#2366CE 100%);
+        color: white; padding: 10px 14px;
+        border-radius: 16px; border-bottom-right-radius: 4px;
+        max-width: 78%; box-shadow: 0 2px 8px rgba(35,102,206,0.25);
+      }
+      .cgpvp-message-user-content p { margin:0; line-height:1.55; font-size:13px; }
+      .cgpvp-chat-input-area {
+        padding: 12px 14px; background: white;
+        border-top: 1px solid #f1f5f9;
+        display: flex; gap: 8px; align-items: center; flex-shrink: 0;
+      }
+      .cgpvp-chat-input {
+        flex: 1; border: 1.5px solid #e5e7eb; border-radius: 12px;
+        padding: 10px 14px; font-size: 13px; outline: none;
+        background: #f8fafc; color: #111827;
+        transition: border-color 0.18s;
+      }
+      .cgpvp-chat-input:focus { border-color: #2366CE; background: #fff; }
+      .cgpvp-chat-input::placeholder { color: #9ca3af; }
+      .cgpvp-chat-input:disabled { opacity: 0.6; cursor: not-allowed; }
+      .cgpvp-chat-mic {
+        width: 38px; height: 38px; border-radius: 10px;
+        background: #f1f5f9; border: 1.5px solid #e5e7eb;
+        cursor: pointer; display: flex; align-items: center; justify-content: center;
+        transition: all 0.18s; flex-shrink: 0; color: #6b7280;
+      }
+      .cgpvp-chat-mic:hover { background: #e0e7ff; border-color: #2366CE; color: #2366CE; }
+      .cgpvp-chat-mic.listening {
+        background: #fee2e2; border-color: #ef4444; color: #ef4444;
+        animation: micPulse 1s ease-in-out infinite;
+      }
+      @keyframes micPulse {
+        0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+        50%      { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
+      }
+      .cgpvp-redirect-chip {
+        display: inline-block; margin-top: 6px;
+        background: #eff6ff; border: 1.5px solid #bfdbfe;
+        border-radius: 8px; padding: 4px 10px;
+        font-size: 11px; font-weight: 600; color: #1d4ed8;
+        font-family: 'Inter', sans-serif;
+      }
+      .cgpvp-chat-send {
+        width: 38px; height: 38px; border-radius: 10px;
+        background: linear-gradient(135deg,#1a3a8f,#2366CE);
+        border: none; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        transition: opacity 0.18s, transform 0.18s; flex-shrink: 0;
+        box-shadow: 0 2px 6px rgba(35,102,206,0.3);
+      }
+      .cgpvp-chat-send:hover  { opacity: 0.88; transform: scale(1.05); }
+      .cgpvp-chat-send:active { transform: scale(0.95); }
+      .cgpvp-chat-send:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+      .cgpvp-chat-send svg { width:18px; height:18px; fill:white; }
+      .cgpvp-powered-by {
+        text-align: center; padding: 7px; font-size: 10px;
+        color: #9ca3af; background: #fff;
+        border-top: 1px solid #f1f5f9; flex-shrink: 0;
+      }
+      /* Typing indicator */
+      .cgpvp-typing-indicator { display: none; padding:10px 15px; background:white;
+        border-radius:15px; border-top-left-radius:5px; width:fit-content;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+      .cgpvp-typing-indicator.show { display:flex; gap:4px; align-items:center; }
+      .cgpvp-typing-dot {
+        width:8px; height:8px; background:#00093C;
+        border-radius:50%; animation: typing-bounce 1.4s infinite;
+      }
+      .cgpvp-typing-dot:nth-child(2) { animation-delay: 0.2s; }
+      .cgpvp-typing-dot:nth-child(3) { animation-delay: 0.4s; }
+      @keyframes typing-bounce {
+        0%,60%,100% { transform: translateY(0);    }
+        30%          { transform: translateY(-10px); }
+      }
+      /* Badge de intención (modo debug, oculto por defecto) */
+      .cgpvp-intent-badge {
+        display: none;  /* cambiar a inline-block para debug */
+        font-size: 9px; color: #6b7280;
+        background: #f1f5f9; border-radius: 4px;
+        padding: 1px 5px; margin-top: 4px;
+      }
+      /* Responsive */
+      @media (max-width: 768px) {
+        .cgpvp-chatbot-container { right:50%; transform:translateX(50%); bottom:20px; }
         .cgpvp-chat-window {
-            position: fixed;
-            bottom: 130px;
-            right: 70px;
-            width: min(380px, calc(100vw - 40px));
-            height: min(540px, calc(100vh - 180px));
-            background: #ffffff;
-            border-radius: 20px;
-            box-shadow: 0 8px 40px rgba(35, 102, 206, 0.18), 0 2px 8px rgba(0,0,0,0.08);
-            display: none;
-            flex-direction: column;
-            overflow: hidden;
-            animation: slideUp 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+          width: calc(100vw - 30px); height: calc(100vh - 180px);
+          max-height: 500px; right:50%; transform:translateX(50%); bottom:100px;
         }
-
-        .cgpvp-chat-window.open {
-            display: flex;
+      }
+      @media (max-width: 480px) {
+        .cgpvp-chatbot-container { right:50%; transform:translateX(50%); bottom:15px; }
+        .cgpvp-chat-window {
+          width: calc(100vw - 20px); height: calc(100vh - 150px);
+          max-height:450px; right:50%; transform:translateX(50%);
+          bottom:80px; border-radius:12px;
         }
-
-        @keyframes slideUp {
-            from { opacity: 0; transform: translateY(20px) scale(0.97); }
-            to   { opacity: 1; transform: translateY(0)    scale(1);    }
-        }
-
-        /* Header — blanco */
-        .cgpvp-chat-header {
-            background: #ffffff;
-            color: #111827;
-            padding: 16px 18px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            position: relative;
-            flex-shrink: 0;
-            border-bottom: none;
-        }
-
-        /* Raya degradada entre header y mensajes */
-        .cgpvp-chat-header::after {
-            content: '';
-            position: absolute;
-            bottom: 0; left: 0; right: 0;
-            height: 3px;
-            background: linear-gradient(90deg, #0f1f6e 0%, #2366CE 50%, #3b82f6 100%);
-        }
-
-        /* Avatar con logo Corredor Azul — directo sin cuadrado */
-        .cgpvp-chat-header-avatar-wrap {
-            display: none;
-        }
-
-        .cgpvp-chat-header-avatar {
-            width: 64px;
-            height: 64px;
-            object-fit: contain;
-            flex-shrink: 0;
-        }
-
-        .cgpvp-chat-header-info { flex: 1; }
-
-        .cgpvp-chat-header-title {
-            font-weight: 700;
-            font-size: 14px;
-            font-family: 'Inter', sans-serif;
-            letter-spacing: -0.01em;
-            margin: 0 0 2px 0;
-            color: #111827;
-        }
-
-        .cgpvp-chat-header-sub {
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.07em;
-            color: rgba(255,255,255,0.65);
-            font-family: 'Inter', sans-serif;
-            margin: 0;
-        }
-
-        .cgpvp-chat-header-status {
-            font-size: 11px;
-            color: #6b7280;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-family: 'Inter', sans-serif;
-        }
-
-        .cgpvp-chat-header-status::before {
-            content: '';
-            width: 7px;
-            height: 7px;
-            background: #22c55e;
-            border-radius: 50%;
-            display: inline-block;
-        }
-
-        .cgpvp-chat-close {
-            background: #f1f5f9;
-            border: none;
-            color: #6b7280;
-            font-size: 16px;
-            cursor: pointer;
-            width: 30px;
-            height: 30px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background 0.2s;
-            border-radius: 8px;
-            flex-shrink: 0;
-        }
-
-        .cgpvp-chat-close:hover { background: #e5e7eb; }
-
-        /* Área de mensajes */
-        .cgpvp-chat-messages {
-            flex: 1;
-            padding: 16px;
-            overflow-y: auto;
-            background: #f8fafc;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .cgpvp-chat-messages::-webkit-scrollbar { width: 4px; }
-        .cgpvp-chat-messages::-webkit-scrollbar-track { background: transparent; }
-        .cgpvp-chat-messages::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 4px; }
-
-        /* Mensajes */
-        .cgpvp-message {
-            animation: fadeInMessage 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        @keyframes fadeInMessage {
-            from { opacity: 0; transform: translateY(8px); }
-            to   { opacity: 1; transform: translateY(0);   }
-        }
-
-        .cgpvp-message-bot {
-            display: flex;
-            gap: 8px;
-            align-items: flex-end;
-        }
-
-        .cgpvp-message-bot-avatar {
-            width: 28px;
-            height: 28px;
-            border-radius: 8px;
-            background: #ffffff;
-            flex-shrink: 0;
-            object-fit: contain;
-            padding: 3px;
-            box-sizing: border-box;
-            border: 1px solid #e5e7eb;
-        }
-
-        .cgpvp-message-bot-content {
-            background: #ffffff;
-            padding: 10px 14px;
-            border-radius: 16px;
-            border-bottom-left-radius: 4px;
-            max-width: 78%;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.07);
-            border: 1px solid #e5e7eb;
-        }
-
-        .cgpvp-message-bot-content p {
-            margin: 0;
-            color: #111827;
-            line-height: 1.55;
-            font-size: 13px;
-            font-family: 'Inter', sans-serif;
-        }
-
-        .cgpvp-message-user {
-            display: flex;
-            justify-content: flex-end;
-        }
-
-        .cgpvp-message-user-content {
-            background: linear-gradient(135deg, #1a3a8f 0%, #2366CE 100%);
-            color: white;
-            padding: 10px 14px;
-            border-radius: 16px;
-            border-bottom-right-radius: 4px;
-            max-width: 78%;
-            box-shadow: 0 2px 8px rgba(35,102,206,0.25);
-        }
-
-        .cgpvp-message-user-content p {
-            margin: 0;
-            line-height: 1.55;
-            font-size: 13px;
-            font-family: 'Inter', sans-serif;
-        }
-
-        /* Área de input */
-        .cgpvp-chat-input-area {
-            padding: 12px 14px;
-            background: white;
-            border-top: 1px solid #f1f5f9;
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            flex-shrink: 0;
-        }
-
-        .cgpvp-chat-input {
-            flex: 1;
-            border: 1.5px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 10px 14px;
-            font-size: 13px;
-            font-family: 'Inter', sans-serif;
-            outline: none;
-            transition: border-color 0.18s;
-            background: #f8fafc;
-            color: #111827;
-        }
-
-        .cgpvp-chat-input:focus {
-            border-color: #2366CE;
-            background: #fff;
-        }
-
-        .cgpvp-chat-input::placeholder { color: #9ca3af; }
-
-        .cgpvp-chat-send {
-            width: 38px;
-            height: 38px;
-            border-radius: 10px;
-            background: linear-gradient(135deg, #1a3a8f, #2366CE);
-            border: none;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: opacity 0.18s, transform 0.18s;
-            flex-shrink: 0;
-            box-shadow: 0 2px 6px rgba(35,102,206,0.3);
-        }
-
-        .cgpvp-chat-send:hover  { opacity: 0.88; transform: scale(1.05); }
-        .cgpvp-chat-send:active { transform: scale(0.95); }
-
-        .cgpvp-chat-send svg {
-            width: 18px;
-            height: 18px;
-            fill: white;
-        }
-
-        /* Footer */
-        .cgpvp-powered-by {
-            text-align: center;
-            padding: 7px;
-            font-size: 10px;
-            color: #9ca3af;
-            font-family: 'Inter', sans-serif;
-            background: #ffffff;
-            border-top: 1px solid #f1f5f9;
-            flex-shrink: 0;
-        }
-
-        .cgpvp-powered-by strong {
-            color: #2366CE;
-            font-weight: 600;
-        }
-
-        /* Indicador de escritura */
-        .cgpvp-typing-indicator {
-            display: none;
-            padding: 10px 15px;
-            background: white;
-            border-radius: 15px;
-            border-top-left-radius: 5px;
-            width: fit-content;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-        }
-
-        .cgpvp-typing-indicator.show {
-            display: flex;
-            gap: 4px;
-            align-items: center;
-        }
-
-        .cgpvp-typing-dot {
-            width: 8px;
-            height: 8px;
-            background: #00093C;
-            border-radius: 50%;
-            animation: typing-bounce 1.4s infinite;
-        }
-
-        .cgpvp-typing-dot:nth-child(2) {
-            animation-delay: 0.2s;
-        }
-
-        .cgpvp-typing-dot:nth-child(3) {
-            animation-delay: 0.4s;
-        }
-
-        @keyframes typing-bounce {
-            0%, 60%, 100% {
-                transform: translateY(0);
-            }
-            30% {
-                transform: translateY(-10px);
-            }
-        }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            .cgpvp-chatbot-container {
-                right: 50%;
-                transform: translateX(50%);
-                bottom: 20px;
-            }
-
-            .cgpvp-chat-window {
-                width: calc(100vw - 30px);
-                height: calc(100vh - 180px);
-                max-height: 500px;
-                right: 50%;
-                transform: translateX(50%);
-                bottom: 100px;
-            }
-
-            .cgpvp-chat-header {
-                padding: 15px;
-            }
-
-            .cgpvp-chat-header-title {
-                font-size: 14px;
-            }
-
-            .cgpvp-chat-header-status {
-                font-size: 11px;
-            }
-
-            .cgpvp-chat-messages {
-                padding: 15px;
-            }
-
-            .cgpvp-message-bot-content,
-            .cgpvp-message-user-content {
-                max-width: 85%;
-                font-size: 13px;
-            }
-
-            .cgpvp-chat-input-area {
-                padding: 12px 15px;
-            }
-
-            .cgpvp-chat-input {
-                padding: 10px 16px;
-                font-size: 13px;
-            }
-
-            .cgpvp-chat-send {
-                width: 40px;
-                height: 40px;
-            }
-        }
-
-        @media (max-width: 480px) {
-            .cgpvp-chatbot-container {
-                right: 50%;
-                transform: translateX(50%);
-                bottom: 15px;
-            }
-
-            .cgpvp-chat-window {
-                width: calc(100vw - 20px);
-                height: calc(100vh - 150px);
-                max-height: 450px;
-                right: 50%;
-                transform: translateX(50%);
-                bottom: 80px;
-                border-radius: 12px;
-            }
-
-            .cgpvp-chat-header {
-                padding: 12px;
-            }
-
-            .cgpvp-chat-header-title {
-                font-size: 13px;
-            }
-
-            .cgpvp-chat-messages {
-                padding: 12px;
-            }
-
-            .cgpvp-message-bot-content,
-            .cgpvp-message-user-content {
-                max-width: 90%;
-                padding: 10px 14px;
-                font-size: 12px;
-            }
-
-            .cgpvp-message-bot-avatar {
-                width: 28px;
-                height: 28px;
-            }
-
-            .cgpvp-chat-input-area {
-                padding: 10px 12px;
-            }
-
-            .cgpvp-chat-input {
-                padding: 9px 14px;
-                font-size: 12px;
-            }
-
-            .cgpvp-chat-send {
-                width: 38px;
-                height: 38px;
-            }
-
-            .cgpvp-chat-send svg {
-                width: 18px;
-                height: 18px;
-            }
-        }
-
-        @media (max-width: 360px) {
-            .cgpvp-chatbot-container {
-                right: 50%;
-                transform: translateX(50%);
-                bottom: 10px;
-            }
-
-            .cgpvp-chat-window {
-                width: calc(100vw - 15px);
-                height: calc(100vh - 130px);
-                max-height: 400px;
-                right: 50%;
-                transform: translateX(50%);
-                bottom: 70px;
-            }
-
-            .cgpvp-chat-header-title {
-                font-size: 12px;
-            }
-
-            .cgpvp-chat-header-status {
-                font-size: 10px;
-            }
-        }
-
-        /* Responsive por altura (pantallas cortas) */
-        @media (max-height: 600px) {
-            .cgpvp-chat-window {
-                height: calc(100vh - 120px);
-                max-height: 350px;
-                bottom: 80px;
-            }
-        }
-
-        @media (max-height: 500px) {
-            .cgpvp-chat-window {
-                height: calc(100vh - 100px);
-                max-height: 300px;
-                bottom: 70px;
-            }
-
-            .cgpvp-chat-messages {
-                padding: 10px;
-            }
-        }
-
-        /* Orientación landscape en móviles */
-        @media (max-width: 768px) and (orientation: landscape) {
-            .cgpvp-chatbot-container {
-                right: 20px;
-                transform: none;
-                bottom: 15px;
-            }
-
-            .cgpvp-chat-window {
-                width: 340px;
-                height: calc(100vh - 100px);
-                max-height: 400px;
-                right: 0;
-                transform: none;
-                bottom: 90px;
-            }
-
-            .cgpvp-chat-header {
-                padding: 10px 15px;
-            }
-
-            .cgpvp-chat-messages {
-                padding: 10px;
-            }
-
-            .cgpvp-chat-input-area {
-                padding: 8px 12px;
-            }
-        }
-
-        /* Orientación portrait en móviles */
-        @media (max-width: 768px) and (orientation: portrait) {
-            .cgpvp-chatbot-container {
-                right: 50%;
-                transform: translateX(50%);
-            }
-
-            .cgpvp-chat-window {
-                right: 50%;
-                transform: translateX(50%);
-            }
-        }
-
-        /* Responsive para tablets en landscape */
-        @media (min-width: 769px) and (max-width: 1024px) {
-            .cgpvp-chat-window {
-                width: 350px;
-                height: 500px;
-            }
-        }
-
-        /* Tablets en portrait */
-        @media (min-width: 481px) and (max-width: 768px) and (orientation: portrait) {
-            .cgpvp-chatbot-container {
-                right: 50%;
-                transform: translateX(50%);
-            }
-
-            .cgpvp-chat-window {
-                width: calc(100vw - 60px);
-                max-width: 450px;
-                height: calc(100vh - 200px);
-                max-height: 550px;
-                right: 50%;
-                transform: translateX(50%);
-            }
-        }
-
-        /* Pantallas grandes */
-        @media (min-width: 1400px) {
-            .cgpvp-chat-window {
-                width: 400px;
-                height: 580px;
-            }
-        }
-
-        /* Pantallas muy altas */
-        @media (min-height: 900px) and (min-width: 769px) {
-            .cgpvp-chat-window {
-                height: 600px;
-            }
-        }
-
-        /* ===== MEJORAS PARA ZOOM 150% Y SUPERIOR ===== */
-        
-        /* Ajustes para zoom 125%-150% en pantallas medianas-grandes */
-        @media (max-width: 1200px) and (min-width: 769px) {
-            .cgpvp-chat-window {
-                width: clamp(320px, 85vw, 380px);
-                height: clamp(450px, 75vh, 550px);
-                right: 20px;
-                bottom: 20px;
-            }
-
-            .cgpvp-chat-header {
-                padding: 10px 14px;
-            }
-
-            .cgpvp-chat-header-title {
-                font-size: 14px;
-            }
-
-            .cgpvp-chat-header-status {
-                font-size: 11px;
-            }
-
-            .cgpvp-message-bot-avatar {
-                width: 26px;
-                height: 26px;
-            }
-
-            .cgpvp-message-user-content,
-            .cgpvp-message-bot-content {
-                font-size: 13px;
-                padding: 8px 12px;
-                max-width: 70%;
-            }
-
-            .cgpvp-chat-input-area {
-                padding: 10px;
-            }
-
-            .cgpvp-chat-input {
-                font-size: 13px;
-                padding: 8px 12px;
-            }
-
-            .cgpvp-chat-send {
-                width: 36px;
-                height: 36px;
-            }
-        }
-
-        /* Ajustes para zoom 150%-200% */
-        @media (max-width: 1000px) and (min-width: 769px) {
-            .cgpvp-chat-window {
-                width: min(90vw, 360px);
-                height: min(80vh, 520px);
-                right: 15px;
-                bottom: 20px;
-            }
-
-            .cgpvp-chat-messages {
-                padding: 10px;
-            }
-
-            .cgpvp-chat-header {
-                padding: 8px 12px;
-            }
-
-            .cgpvp-message-user-content,
-            .cgpvp-message-bot-content {
-                font-size: 12px;
-                padding: 7px 10px;
-            }
-        }
-
-        /* Ajustes para zoom superior a 200% */
-        @media (max-width: 900px) and (min-width: 769px) {
-            .cgpvp-chat-window {
-                width: min(92vw, 340px);
-                height: min(85vh, 480px);
-                right: 10px;
-                bottom: 20px;
-            }
-
-            .cgpvp-chat-header-title {
-                font-size: 13px;
-            }
-
-            .cgpvp-chat-header-status {
-                font-size: 10px;
-            }
-
-            .cgpvp-message-user-content,
-            .cgpvp-message-bot-content {
-                font-size: 12px;
-                max-width: 75%;
-            }
-
-            .cgpvp-chat-input {
-                font-size: 12px;
-                padding: 7px 10px;
-            }
-
-            .cgpvp-chat-send {
-                width: 34px;
-                height: 34px;
-            }
-        }
-
-        /* Ajustes para pantallas con zoom y altura limitada */
-        @media (max-width: 1024px) and (min-width: 769px) and (max-height: 700px) {
-            .cgpvp-chat-window {
-                height: clamp(380px, 68vh, 460px);
-            }
-
-            .cgpvp-chat-messages {
-                padding: 8px;
-            }
-        }
-
-        /* Ajustes para pantallas muy pequeñas con zoom alto */
-        @media (max-width: 850px) and (min-width: 769px) and (max-height: 600px) {
-            .cgpvp-chat-window {
-                width: min(88vw, 320px);
-                height: min(75vh, 420px);
-            }
-
-            .cgpvp-chat-header {
-                padding: 7px 10px;
-            }
-
-            .cgpvp-message-bot-avatar {
-                width: 24px;
-                height: 24px;
-            }
-        }
+      }
+      @media (min-width: 1400px) {
+        .cgpvp-chat-window { width:400px; height:580px; }
+      }
     `;
-
-    // Crear e insertar estilos
-    const styleSheet = document.createElement('style');
+ 
+    const styleSheet = document.createElement("style");
     styleSheet.textContent = styles;
     document.head.appendChild(styleSheet);
-
-    // HTML del chatbot
+ 
+    // ── HTML ──────────────────────────────────────────────────────
     const chatbotHTML = `
-        <div class="cgpvp-chatbot-container">
-            <div class="cgpvp-chat-window" id="cgpvpChatWindow">
-
-                <!-- Header -->
-                <div class="cgpvp-chat-header">
-                    <img src="Logo_CorredorAzul.png" alt="Corredor Azul" class="cgpvp-chat-header-avatar">
-                    <div class="cgpvp-chat-header-info">
-                        <div class="cgpvp-chat-header-title">Asistente Corredor Azul</div>
-                        <div class="cgpvp-chat-header-status">En línea</div>
-                    </div>
-                    <button class="cgpvp-chat-close" id="cgpvpCloseChat">✕</button>
-                </div>
-
-                <!-- Mensajes -->
-                <div class="cgpvp-chat-messages" id="cgpvpChatMessages">
-                    <div class="cgpvp-message cgpvp-message-bot">
-                        <img src="Logo_CorredorAzul.png" alt="Bot" class="cgpvp-message-bot-avatar">
-                        <div class="cgpvp-message-bot-content">
-                            <p>¡Hola! 👋 Soy tu asistente de <strong>Corredor Azul</strong>. ¿En qué puedo ayudarte hoy?</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Input -->
-                <div class="cgpvp-chat-input-area">
-                    <input
-                        type="text"
-                        class="cgpvp-chat-input"
-                        id="cgpvpChatInput"
-                        placeholder="Escribe tu consulta..."
-                        autocomplete="off"
-                    >
-                    <button class="cgpvp-chat-send" id="cgpvpSendMessage">
-                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-                        </svg>
-                    </button>
-                </div>
-
-                <!-- Footer -->
-                <div class="cgpvp-powered-by">
-                    Corredor Azul · Sistema de transporte público
-                </div>
-
+      <div class="cgpvp-chatbot-container">
+        <div class="cgpvp-chat-window" id="cgpvpChatWindow">
+          <div class="cgpvp-chat-header">
+            <img src="Logo_CorredorAzul.png" alt="Corredor Azul" class="cgpvp-chat-header-avatar">
+            <div class="cgpvp-chat-header-info">
+              <div class="cgpvp-chat-header-title">Asistente Corredor Azul</div>
+              <div class="cgpvp-chat-header-status" id="cgpvpStatusText">En línea</div>
             </div>
+            <button class="cgpvp-chat-tts" id="cgpvpTtsButton" title="Activar/silenciar voz">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z"/>
+              </svg>
+            </button>
+            <button class="cgpvp-chat-close" id="cgpvpCloseChat">✕</button>
+          </div>
+          <div class="cgpvp-chat-messages" id="cgpvpChatMessages">
+            <div class="cgpvp-message cgpvp-message-bot">
+              <img src="Logo_CorredorAzul.png" alt="Bot" class="cgpvp-message-bot-avatar">
+              <div class="cgpvp-message-bot-content">
+                <p>¡Hola! 👋 Soy tu asistente de <strong>Corredor Azul</strong>. ¿En qué puedo ayudarte hoy?</p>
+              </div>
+            </div>
+          </div>
+          <div class="cgpvp-chat-input-area">
+            <button class="cgpvp-chat-mic" id="cgpvpMicButton" title="Hablar">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M12 1.5a3 3 0 00-3 3v7.5a3 3 0 006 0V4.5a3 3 0 00-3-3z"/>
+                <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M19.5 10.5a7.5 7.5 0 01-15 0M12 18.75v3M9 21.75h6"/>
+              </svg>
+            </button>
+            <input type="text" class="cgpvp-chat-input" id="cgpvpChatInput"
+              placeholder="Escribe o habla tu consulta..." autocomplete="off">
+            <button class="cgpvp-chat-send" id="cgpvpSendMessage">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="cgpvp-powered-by">
+            Corredor Azul · Sistema de transporte público
+          </div>
         </div>
+      </div>
     `;
-
-    // Insertar chatbot en el DOM cuando esté listo
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initChatbot);
+ 
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", initChatbot);
     } else {
-        initChatbot();
+      initChatbot();
     }
-
+ 
     function initChatbot() {
-        const chatbotContainer = document.createElement('div');
-        chatbotContainer.innerHTML = chatbotHTML;
-        document.body.appendChild(chatbotContainer);
+      const container = document.createElement("div");
+      container.innerHTML = chatbotHTML;
+      document.body.appendChild(container);
+ 
+      const chatWindow    = document.getElementById("cgpvpChatWindow");
+      const closeButton   = document.getElementById("cgpvpCloseChat");
+      const messagesEl    = document.getElementById("cgpvpChatMessages");
+      const inputEl       = document.getElementById("cgpvpChatInput");
+      const sendButton    = document.getElementById("cgpvpSendMessage");
+      const statusText    = document.getElementById("cgpvpStatusText");
+      const micButton     = document.getElementById("cgpvpMicButton");
 
-        // Elementos
-        const chatWindow = document.getElementById('cgpvpChatWindow');
-        const closeButton = document.getElementById('cgpvpCloseChat');
-        const messagesContainer = document.getElementById('cgpvpChatMessages');
-        const inputField = document.getElementById('cgpvpChatInput');
-        const sendButton = document.getElementById('cgpvpSendMessage');
+      // ── Mapa de intención → ruta Angular ────────────────────────
+      const redirectMap = {
+        'atencion_cliente':   '/user/canalatencion',
+        'recarga_saldo':      '/user/recargas',
+        'metodos_pago':       '/user/recargas',
+        'rutas':              '/user/verbuses',
+        'estado_bus':         '/user/ubicacion',
+        'ubicacion_paradero': '/user/ubicacion',
+        'informacion_general': '/user/noticias',
+        'horarios':            '/user/noticias',
+        'tarifas':             '/user/noticias',
+        'app_problemas':       '/user/canalatencion',
+        'tarjeta_problemas':   '/user/canalatencion',
+      };
 
-        // Respuestas predefinidas del bot
-        const botResponses = {
-            'hola': '¡Hola! 👋 Bienvenido a Corredor Azul. ¿En qué puedo ayudarte hoy?',
-            'saldo': 'Puedes consultar tu saldo disponible en la pantalla de inicio o en la sección de Recargas. ¿Deseas recargar ahora?',
-            'recarga': 'Aceptamos Yape, Plin, PagoEfectivo y tarjeta de crédito/débito. Ingresa a la sección "Recargar saldo" para continuar. 💳',
-            'recargar': 'Aceptamos Yape, Plin, PagoEfectivo y tarjeta de crédito/débito. Ingresa a la sección "Recargar saldo" para continuar. 💳',
-            'yape': 'Para recargar con Yape, selecciona el monto, elige Yape como método de pago y sigue los pasos en pantalla. ¡Es instantáneo!',
-            'plin': 'Para recargar con Plin, selecciona el monto, elige Plin como método de pago y transfiere desde tu app bancaria.',
-            'bus': 'Puedes ver todos los buses en ruta en la sección "Ver Buses". Ahí encontrarás las rutas disponibles en tiempo real. 🚌',
-            'buses': 'Puedes ver todos los buses en ruta en la sección "Ver Buses". Ahí encontrarás las rutas disponibles en tiempo real. 🚌',
-            'ruta': 'Consulta las rutas disponibles en la sección "Ver Buses" o revisa el mapa en "Ubicación". 🗺️',
-            'ubicacion': 'En la sección "Ubicación" puedes ver el mapa en tiempo real con los buses más cercanos a ti.',
-            'ubicación': 'En la sección "Ubicación" puedes ver el mapa en tiempo real con los buses más cercanos a ti.',
-            'tarjeta': 'Tu tarjeta Corredor Azul es recargable. Puedes recargar desde la app con Yape, Plin, PagoEfectivo o tarjeta bancaria.',
-            'contacto': 'Puedes contactarnos a través de la sección "Canales de Atención" en la app. Estamos para ayudarte. 📞',
-            'horario': 'El servicio Corredor Azul opera de lunes a domingo. Consulta los horarios exactos en la sección "Ver Buses".',
-            'horarios': 'El servicio Corredor Azul opera de lunes a domingo. Consulta los horarios exactos en la sección "Ver Buses".',
-            'problema': 'Lamentamos el inconveniente. Por favor describe tu problema y un asesor te contactará pronto. También puedes ir a "Canales de Atención".',
-            'ayuda': '¡Con gusto te ayudo! Puedo orientarte sobre recargas, rutas, buses, tu saldo o cualquier duda sobre el servicio Corredor Azul. 😊',
-            'gracias': '¡De nada! Si tienes alguna otra consulta, aquí estaré. ¡Buen viaje! 🚌',
-            'default': 'Gracias por tu mensaje. Un asesor revisará tu consulta y te responderá pronto. También puedes visitar "Canales de Atención" para contactarnos directamente. 😊'
+      const redirectLabels = {
+        '/user/canalatencion': '📞 Canales de Atención',
+        '/user/recargas':      '💳 Recargas',
+        '/user/verbuses':      '🚌 Ver Buses',
+        '/user/ubicacion':     '📍 Mi Ubicación',
+        '/user/noticias':      '📰 Noticias',
+      };
+
+      // ── Speech-to-Text ───────────────────────────────────────────
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        micButton.style.display = 'none'; // navegador no soporta
+      } else {
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'es-PE';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        let listening = false;
+
+        micButton.addEventListener('click', () => {
+          if (listening) {
+            recognition.stop();
+          } else {
+            recognition.start();
+          }
+        });
+
+        recognition.onstart = () => {
+          listening = true;
+          micButton.classList.add('listening');
+          inputEl.placeholder = 'Escuchando...';
         };
 
-        // Abrir chat al hacer clic en el head-bot
-        document.addEventListener('headbot-click', function() {
-            chatWindow.classList.toggle('open');
-            if (chatWindow.classList.contains('open')) {
-                inputField.focus();
-                // Ocultar cabeza y círculo en desktop con zoom alto (175%+)
-                hideHeadBotOnZoom();
-            } else {
-                // Mostrar cabeza y círculo cuando se cierra el chat
-                showHeadBot();
-            }
-        });
+        recognition.onend = () => {
+          listening = false;
+          micButton.classList.remove('listening');
+          inputEl.placeholder = 'Escribe o habla tu consulta...';
+        };
 
-        // Cerrar chat
-        closeButton.addEventListener('click', function(e) {
-            e.stopPropagation();
-            chatWindow.classList.remove('open');
-            // Mostrar cabeza y círculo cuando se cierra el chat
-            showHeadBot();
-        });
+        recognition.onresult = (e) => {
+          const transcript = e.results[0][0].transcript;
+          inputEl.value = transcript;
+          setTimeout(() => sendMessage(), 300); // pequeño delay para que se vea el texto
+        };
 
-        // Función para ocultar headbot en zoom alto
-        function hideHeadBotOnZoom() {
-            const canvas = document.getElementById('headbot-canvas');
-            const clickArea = document.getElementById('headbot-clickarea');
-            
-            // Detectar si estamos en desktop con zoom alto
-            const viewportWidth = window.innerWidth;
-            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-            const isDesktopZoom = viewportWidth <= 1024 && viewportWidth > 768 && !isMobile;
-            
-            if (isDesktopZoom && canvas && clickArea) {
-                canvas.style.visibility = 'hidden';
-                clickArea.style.visibility = 'hidden';
-            }
+        recognition.onerror = () => {
+          listening = false;
+          micButton.classList.remove('listening');
+          inputEl.placeholder = 'Escribe o habla tu consulta...';
+        };
+      }
+
+      // ── Text-to-Speech ───────────────────────────────────────────
+      const ttsButton = document.getElementById('cgpvpTtsButton');
+      let ttsEnabled = true;
+
+      ttsButton.addEventListener('click', () => {
+        ttsEnabled = !ttsEnabled;
+        ttsButton.classList.toggle('tts-off', !ttsEnabled);
+        ttsButton.title = ttsEnabled ? 'Silenciar voz' : 'Activar voz';
+        if (!ttsEnabled) window.speechSynthesis.cancel();
+      });
+
+      function speak(text) {
+        if (!ttsEnabled) return;
+        // Limpiar markdown/emojis antes de enviar al backend
+        const clean = text
+          .replace(/\*\*(.*?)\*\*/g, '$1')
+          .replace(/\*(.*?)\*/g, '$1')
+          .replace(/[#*_`>\-•]/g, '')
+          .replace(/https?:\/\/\S+/g, '')
+          .replace(/[\u{1F300}-\u{1FAFF}]/gu, '')
+          .trim();
+        fetch(`${CHATBOT_API_URL}/tts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: clean })
+        })
+        .then(r => r.json())
+        .then(({ audio }) => {
+          const audioEl = new Audio(`data:audio/wav;base64,${audio}`);
+          audioEl.play();
+        })
+        .catch(err => console.warn('[HeadBot TTS]', err));
+      }
+
+      // Historial de conversación para contexto multi-turno
+      const conversationHistory = [];
+ 
+      // ── Abrir / cerrar chat ──────────────────────────────────
+      const _headbotClickHandler = function () {
+        chatWindow.classList.toggle("open");
+        if (chatWindow.classList.contains("open")) {
+          inputEl.focus();
+          _hideHeadBotOnZoom();
+        } else {
+          _showHeadBot();
         }
-
-        // Función para mostrar headbot
-        function showHeadBot() {
-            const canvas = document.getElementById('headbot-canvas');
-            const clickArea = document.getElementById('headbot-clickarea');
-            
-            if (canvas && clickArea) {
-                canvas.style.visibility = 'visible';
-                clickArea.style.visibility = 'visible';
-            }
+      };
+      document.addEventListener("headbot-click", _headbotClickHandler);
+      window._headBotClickHandler = _headbotClickHandler;
+ 
+      closeButton.addEventListener("click", (e) => {
+        e.stopPropagation();
+        chatWindow.classList.remove("open");
+        _showHeadBot();
+      });
+ 
+      function _hideHeadBotOnZoom() {
+        const vw = window.innerWidth;
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        if (vw <= 1024 && vw > 768 && !isMobile) {
+          document.getElementById("headbot-canvas")?.style.setProperty("visibility","hidden");
+          document.getElementById("headbot-clickarea")?.style.setProperty("visibility","hidden");
         }
-
-        // Función para agregar mensaje
-        function addMessage(message, isUser = false) {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `cgpvp-message ${isUser ? 'cgpvp-message-user' : 'cgpvp-message-bot'}`;
-            
-            if (isUser) {
-                messageDiv.innerHTML = `
-                    <div class="cgpvp-message-user-content">
-                        <p>${message}</p>
-                    </div>
-                `;
-            } else {
-                messageDiv.innerHTML = `
-                    <img src="Logo_CorredorAzul.png" alt="Bot" class="cgpvp-message-bot-avatar">
-                    <div class="cgpvp-message-bot-content">
-                        <p>${message}</p>
-                    </div>
-                `;
-            }
-            
-            messagesContainer.appendChild(messageDiv);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
+      function _showHeadBot() {
+        document.getElementById("headbot-canvas")?.style.setProperty("visibility","visible");
+        document.getElementById("headbot-clickarea")?.style.setProperty("visibility","visible");
+      }
+ 
+      // ── Helpers de UI ────────────────────────────────────────
+      function addMessage(html, isUser = false, intentInfo = null) {
+        const wrap = document.createElement("div");
+        wrap.className = `cgpvp-message ${isUser ? "cgpvp-message-user" : "cgpvp-message-bot"}`;
+ 
+        if (isUser) {
+          wrap.innerHTML = `<div class="cgpvp-message-user-content"><p>${html}</p></div>`;
+        } else {
+          // Convertir saltos de línea en <br> y mantener formato básico
+          const formatted = html.replace(/\n/g, "<br>");
+          const badgeHtml = intentInfo
+            ? `<span class="cgpvp-intent-badge">${intentInfo.intent} (${(intentInfo.confidence*100).toFixed(0)}%)</span>`
+            : "";
+          wrap.innerHTML = `
+            <img src="Logo_CorredorAzul.png" alt="Bot" class="cgpvp-message-bot-avatar">
+            <div class="cgpvp-message-bot-content">
+              <p>${formatted}</p>
+              ${badgeHtml}
+            </div>
+          `;
         }
+ 
+        messagesEl.appendChild(wrap);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+ 
+      function showTyping() {
+        const div = document.createElement("div");
+        div.className = "cgpvp-message cgpvp-message-bot";
+        div.id = "cgpvpTyping";
+        div.innerHTML = `
+          <img src="Logo_CorredorAzul.png" alt="Bot" class="cgpvp-message-bot-avatar">
+          <div class="cgpvp-typing-indicator show">
+            <div class="cgpvp-typing-dot"></div>
+            <div class="cgpvp-typing-dot"></div>
+            <div class="cgpvp-typing-dot"></div>
+          </div>`;
+        messagesEl.appendChild(div);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+ 
+      function hideTyping() {
+        document.getElementById("cgpvpTyping")?.remove();
+      }
+ 
+      function setInputDisabled(disabled) {
+        inputEl.disabled    = disabled;
+        sendButton.disabled = disabled;
+      }
+ 
+      function setStatus(online = true) {
+        statusText.textContent = online ? "En línea" : "Procesando...";
+        statusText.style.color = online ? "" : "#f59e0b";
+      }
+ 
+      // Escapar HTML para evitar XSS en mensajes del usuario
+      function escapeHtml(text) {
+        return text
+          .replace(/&/g,"&amp;")
+          .replace(/</g,"&lt;")
+          .replace(/>/g,"&gt;")
+          .replace(/"/g,"&quot;");
+      }
+ 
+      // ── Envío de mensaje ─────────────────────────────────────
+      async function sendMessage() {
+        const message = inputEl.value.trim();
+        if (!message) return;
+ 
+        addMessage(escapeHtml(message), true);
+        inputEl.value = "";
+        setInputDisabled(true);
+        setStatus(false);
+        showTyping();
+ 
+        try {
+          const response = await fetch(`${CHATBOT_API_URL}/chat`, {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message,
+              history: conversationHistory.slice(-6), // últimas 6 interacciones
+            }),
+          });
+ 
+          if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${response.status}`);
+          }
+ 
+          const data = await response.json();
+ 
+          // Guardar en historial para contexto multi-turno
+          conversationHistory.push({ role: "user",      content: message       });
+          conversationHistory.push({ role: "assistant", content: data.reply    });
+ 
+          hideTyping();
+          addMessage(escapeHtml(data.reply), false, data.intent);
+          speak(data.reply);
 
-        // Función para mostrar indicador de escritura
-        function showTypingIndicator() {
-            const typingDiv = document.createElement('div');
-            typingDiv.className = 'cgpvp-message cgpvp-message-bot';
-            typingDiv.id = 'typingIndicator';
-            typingDiv.innerHTML = `
-                <img src="Logo_CorredorAzul.png" alt="Bot" class="cgpvp-message-bot-avatar">
-                <div class="cgpvp-typing-indicator show">
-                    <div class="cgpvp-typing-dot"></div>
-                    <div class="cgpvp-typing-dot"></div>
-                    <div class="cgpvp-typing-dot"></div>
-                </div>
-            `;
-            messagesContainer.appendChild(typingDiv);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+          // ── Redirect por intención ───────────────────────────────
+          const ruta = redirectMap[data.intent?.intent];
+          if (ruta && typeof window.navegarA === 'function') {
+            const label = redirectLabels[ruta] || ruta;
+            // Mostrar chip de redirección en el último mensaje
+            setTimeout(() => {
+              const lastBot = messagesEl.querySelectorAll('.cgpvp-message-bot-content');
+              const ultimo = lastBot[lastBot.length - 1];
+              if (ultimo) {
+                const chip = document.createElement('span');
+                chip.className = 'cgpvp-redirect-chip';
+                chip.textContent = `↗ Redirigiendo a ${label}...`;
+                ultimo.appendChild(chip);
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+              }
+            }, 200);
+            // Navegar después de 1800ms
+            setTimeout(() => window.navegarA(ruta), 1800);
+          }
+ 
+        } catch (err) {
+          hideTyping();
+          console.error("[HeadBot] Error:", err);
+          addMessage(
+            "Lo siento, tuve un problema para procesar tu consulta. " +
+            "Por favor intenta nuevamente o visita <strong style='color:#2366CE;cursor:pointer;text-decoration:underline;' onclick=\"window.navegarA && window.navegarA('/user/canalatencion')\">Canales de Atención</strong>.",
+            false
+          );
+        } finally {
+          setInputDisabled(false);
+          setStatus(true);
+          inputEl.focus();
         }
-
-        function hideTypingIndicator() {
-            const typingIndicator = document.getElementById('typingIndicator');
-            if (typingIndicator) {
-                typingIndicator.remove();
-            }
-        }
-
-        // Función para obtener respuesta del bot
-        function getBotResponse(userMessage) {
-            const messageLower = userMessage.toLowerCase();
-            
-            for (let key in botResponses) {
-                if (messageLower.includes(key)) {
-                    return botResponses[key];
-                }
-            }
-            
-            return botResponses['default'];
-        }
-
-        // Enviar mensaje
-        function sendMessage() {
-            const message = inputField.value.trim();
-            
-            if (message === '') return;
-            
-            // Agregar mensaje del usuario
-            addMessage(message, true);
-            inputField.value = '';
-            
-            // Mostrar indicador de escritura
-            showTypingIndicator();
-            
-            // Simular respuesta del bot después de 1-2 segundos
-            setTimeout(function() {
-                hideTypingIndicator();
-                const botResponse = getBotResponse(message);
-                addMessage(botResponse, false);
-            }, 1000 + Math.random() * 1000);
-        }
-
-        // Event listeners para enviar mensaje
-        sendButton.addEventListener('click', sendMessage);
-        
-        inputField.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                sendMessage();
-            }
-        });
+      }
+ 
+      sendButton.addEventListener("click", sendMessage);
+      inputEl.addEventListener("keypress", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) sendMessage();
+      });
     }
-})();
-
-// ========== BURBUJA DE AYUDA ==========
-(function() {
-    'use strict';
-
-
-    // Estilos para la burbuja de ayuda
+  })();
+ 
+  // ── BURBUJA DE AYUDA ──────────────────────────────────────────────
+  (function () {
+    "use strict";
+ 
     const bubbleStyles = `
-        /* Burbuja de ayuda - Posicionada al lado izquierdo del círculo del bot */
-        .cgpvp-help-bubble {
-            position: fixed;
-            bottom: 50px;
-            right: 150px;
-            background: linear-gradient(135deg, #0f1f6e 0%, #2366CE 100%);
-            color: white;
-            padding: 12px 20px;
-            border-radius: 20px;
-            box-shadow: 0 4px 15px rgba(35, 102, 206, 0.4);
-            font-family: 'Poppins', sans-serif;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            z-index: 9999;
-            animation: bubbleBounce 2s ease-in-out infinite;
-            transition: all 0.3s ease;
-            white-space: nowrap;
-        }
-
-        /* Flecha apuntando hacia el círculo del bot */
-        .cgpvp-help-bubble::after {
-            content: '';
-            position: absolute;
-            right: -8px;
-            top: 50%;
-            transform: translateY(-50%);
-            width: 0;
-            height: 0;
-            border-left: 10px solid #2366CE;
-            border-top: 8px solid transparent;
-            border-bottom: 8px solid transparent;
-        }
-
-        .cgpvp-help-bubble:hover {
-            transform: scale(1.05);
-            box-shadow: 0 6px 20px rgba(35, 102, 206, 0.6);
-        }
-
-        .cgpvp-help-bubble.hidden {
-            opacity: 0;
-            pointer-events: none;
-            transform: scale(0.8);
-        }
-
-        @keyframes bubbleBounce {
-            0%, 100% {
-                transform: translateY(0);
-            }
-            50% {
-                transform: translateY(-5px);
-            }
-        }
-
-        /* Responsive - Ajustes para tablet */
-        @media (max-width: 768px) {
-            .cgpvp-help-bubble {
-                bottom: 45px;
-                right: 140px;
-                font-size: 12px;
-                padding: 10px 16px;
-            }
-            
-            /* Ajustar AMBOS objetos del bot en tablet */
-            #headbot-canvas {
-                bottom: -115px !important;
-                right: -60px !important;
-            }
-            
-            #headbot-clickarea {
-                bottom: 30px !important;
-                right: 50px !important;
-            }
-        }
-
-        /* Responsive - Ajustes para móvil (OCULTAR BURBUJA) */
-        @media (max-width: 480px) {
-            /* OCULTAR la burbuja completamente en móvil */
-            .cgpvp-help-bubble {
-                display: none !important;
-            }
-            
-            /* Ajustar CANVAS (cabeza 3D) - SIN CAMBIOS */
-            #headbot-canvas {
-                bottom: -105px !important;
-                right: -55px !important;
-                width: 235px !important;
-                height: 235px !important;
-            }
-            
-            /* Ajustar CÍRCULO CLICABLE - posición base (100% zoom) */
-            #headbot-clickarea {
-                bottom: 30px !important;
-                right: 38px !important;
-                width: 56px !important;
-                height: 56px !important;
-            }
-        }
-        
-        /* Zoom 110% - el viewport se reduce a ~436px */
-        @media (max-width: 436px) {
-            #headbot-clickarea {
-                bottom: 10px !important;
-                right: 28px !important;
-            }
-        }
-        
-        /* Zoom 125% - el viewport se reduce a ~384px */
-        @media (max-width: 384px) {
-            #headbot-clickarea {
-                bottom: 15px !important;
-                right: 28px !important;
-            }
-        }
-        
-        /* Zoom 150% - el viewport se reduce a ~320px */
-        @media (max-width: 320px) {
-            #headbot-clickarea {
-                bottom: 10px !important;
-                right: 24px !important;
-            }
-        }
-        
-        /* Zoom 175% - el viewport se reduce a ~274px */
-        @media (max-width: 274px) {
-            #headbot-clickarea {
-                bottom: 5px !important;
-                right: 20px !important;
-            }
-        }
-        
-        /* Ajuste adicional para pantallas pequeñas (≤400px) */
-        @media (max-width: 400px) {
-            #headbot-canvas {
-                bottom: -100px !important;
-                right: -50px !important;
-                width: 225px !important;
-                height: 225px !important;
-            }
-        }
-        
-        /* Ajuste para pantallas MUY pequeñas (≤360px) */
-        @media (max-width: 360px) {
-            #headbot-canvas {
-                bottom: -95px !important;
-                right: -45px !important;
-                width: 215px !important;
-                height: 215px !important;
-            }
-        }
+      .cgpvp-help-bubble {
+        position: fixed; bottom: 50px; right: 150px;
+        background: linear-gradient(135deg,#0f1f6e 0%,#2366CE 100%);
+        color: white; padding: 12px 20px; border-radius: 20px;
+        box-shadow: 0 4px 15px rgba(35,102,206,0.4);
+        font-family: 'Poppins', sans-serif; font-size: 14px; font-weight: 500;
+        cursor: pointer; z-index: 9999;
+        animation: bubbleBounce 2s ease-in-out infinite;
+        transition: all 0.3s ease; white-space: nowrap;
+      }
+      .cgpvp-help-bubble::after {
+        content: ''; position: absolute; right:-8px; top:50%;
+        transform: translateY(-50%);
+        border-left: 10px solid #2366CE;
+        border-top: 8px solid transparent; border-bottom: 8px solid transparent;
+      }
+      .cgpvp-help-bubble:hover { transform: scale(1.05); box-shadow: 0 6px 20px rgba(35,102,206,0.6); }
+      .cgpvp-help-bubble.hidden { opacity:0; pointer-events:none; transform:scale(0.8); }
+      @keyframes bubbleBounce {
+        0%,100% { transform: translateY(0);   }
+        50%      { transform: translateY(-5px); }
+      }
+      @media (max-width: 480px) { .cgpvp-help-bubble { display: none !important; } }
     `;
-
-    // Insertar estilos de la burbuja
-    const bubbleStyleSheet = document.createElement('style');
-    bubbleStyleSheet.textContent = bubbleStyles;
-    document.head.appendChild(bubbleStyleSheet);
-
-    // HTML de la burbuja de ayuda
-    const bubbleHTML = `
-        <div class="cgpvp-help-bubble" id="cgpvpHelpBubble">
-            ¿Necesitas ayuda? 💬
-        </div>
-    `;
-
-    // Insertar burbuja en el DOM cuando esté listo
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initBubble);
-    } else {
-        initBubble();
-    }
-
-    function initBubble() {
-        const bubbleContainer = document.createElement('div');
-        bubbleContainer.innerHTML = bubbleHTML;
-        document.body.appendChild(bubbleContainer);
-
-        const helpBubble = document.getElementById('cgpvpHelpBubble');
-
-        // Click en la burbuja para abrir el chat
-        helpBubble.addEventListener('click', function() {
-            // Disparar el evento para abrir el chat (el headbot ya tiene este listener)
-            const event = new CustomEvent('headbot-click');
-            document.dispatchEvent(event);
-            
-            // Ocultar la burbuja cuando se abre el chat
-            helpBubble.classList.add('hidden');
-        });
-
-        // Escuchar cuando se cierra el chat para mostrar la burbuja nuevamente
-        document.addEventListener('click', function(e) {
-            if (e.target && e.target.id === 'cgpvpCloseChat') {
-                setTimeout(() => {
-                    helpBubble.classList.remove('hidden');
-                }, 300);
-            }
-        });
-
-        // También mostrar la burbuja si el chat se cierra de otra manera
-        const chatWindow = document.getElementById('cgpvpChatWindow');
-        if (chatWindow) {
-            const observer = new MutationObserver(function(mutations) {
-                mutations.forEach(function(mutation) {
-                    if (mutation.attributeName === 'class') {
-                        const isOpen = chatWindow.classList.contains('open');
-                        if (isOpen) {
-                            helpBubble.classList.add('hidden');
-                        } else {
-                            setTimeout(() => {
-                                helpBubble.classList.remove('hidden');
-                            }, 300);
-                        }
-                    }
-                });
-            });
-
-            observer.observe(chatWindow, { attributes: true });
+ 
+    const s = document.createElement("style");
+    s.textContent = bubbleStyles;
+    document.head.appendChild(s);
+ 
+    const div = document.createElement("div");
+    div.innerHTML = `<div class="cgpvp-help-bubble" id="cgpvpHelpBubble">¿Necesitas ayuda? 💬</div>`;
+    document.body.appendChild(div);
+ 
+    const bubble = document.getElementById("cgpvpHelpBubble");
+ 
+    bubble.addEventListener("click", () => {
+      document.dispatchEvent(new CustomEvent("headbot-click"));
+      bubble.classList.add("hidden");
+    });
+ 
+    // Observar apertura/cierre del chat para mostrar/ocultar burbuja
+    const chatWindow = document.getElementById("cgpvpChatWindow");
+    if (chatWindow) {
+      new MutationObserver(() => {
+        const isOpen = chatWindow.classList.contains("open");
+        if (isOpen) {
+          bubble.classList.add("hidden");
+        } else {
+          setTimeout(() => bubble.classList.remove("hidden"), 300);
         }
+      }).observe(chatWindow, { attributes: true });
     }
-})();
-
-}; // fin window.initHeadBot
-
-// Limpieza al salir del componente Angular
-window.destroyHeadBot = function() {
-  // Remover canvas y clickarea
-  const canvas = document.getElementById('headbot-canvas');
-  const clickArea = document.getElementById('headbot-clickarea');
-  const headBotEl = document.querySelector('head-bot');
-  const chatWindow = document.getElementById('cgpvpChatWindow');
-  const bubble = document.getElementById('cgpvpHelpBubble');
-
-  if (headBotEl) headBotEl.remove();
-  if (canvas) canvas.remove();
-  if (clickArea) clickArea.remove();
-  if (chatWindow) chatWindow.closest('.cgpvp-chatbot-container')?.remove();
-  if (bubble) bubble.parentElement?.remove();
+  })();
+};
+ 
+ 
+// =====================================================================
+//  CLEANUP (llamar desde Angular al destruir el componente)
+// =====================================================================
+window.destroyHeadBot = function () {
+  if (window._headBotRafId) {
+    cancelAnimationFrame(window._headBotRafId);
+    window._headBotRafId = null;
+  }
+  if (window._headBotMouseMoveHandler) {
+    window.removeEventListener("mousemove", window._headBotMouseMoveHandler);
+    window._headBotMouseMoveHandler = null;
+  }
+  if (window._headBotClickHandler) {
+    document.removeEventListener("headbot-click", window._headBotClickHandler);
+    window._headBotClickHandler = null;
+  }
+  if (window._headBotRenderer) {
+    window._headBotRenderer.dispose();
+    window._headBotRenderer.forceContextLoss();
+    window._headBotRenderer = null;
+  }
+  document.querySelector("head-bot")?.remove();
+  document.getElementById("headbot-canvas")?.remove();
+  document.getElementById("headbot-clickarea")?.remove();
+  document.getElementById("cgpvpChatWindow")?.closest(".cgpvp-chatbot-container")?.remove();
+  document.getElementById("cgpvpHelpBubble")?.parentElement?.remove();
 };
