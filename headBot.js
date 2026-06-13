@@ -32320,7 +32320,7 @@ class RGBELoader extends HDRLoader {
     super(manager);
   }
 }
-const CHATBOT_API_URL = "http://localhost:8000";
+const CHATBOT_API_URL = "https://jhordanmc-backendsolucioneswebml.hf.space";
 class HeadBot extends HTMLElement {
   connectedCallback() {
     const canvas = document.createElement("canvas");
