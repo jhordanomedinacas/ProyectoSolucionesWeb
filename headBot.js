@@ -32320,7 +32320,7 @@ class RGBELoader extends HDRLoader {
     super(manager);
   }
 }
-const CHATBOT_API_URL = "https://jhordanmc-backendsolucioneswebml.hf.space";
+const CHATBOT_API_URL = "http://localhost:8001";
 class HeadBot extends HTMLElement {
   connectedCallback() {
     const canvas = document.createElement("canvas");
@@ -32391,9 +32391,17 @@ class HeadBot extends HTMLElement {
     window.addEventListener("mousemove", _mouseMoveHandler);
     window._headBotMouseMoveHandler = _mouseMoveHandler;
  
+    // Usar la versión sin parchear de rAF para no bloquear el change detection de Angular.
+    // Zone.js expone el rAF original en Zone.__zone_symbol__requestAnimationFrame.
+    const _raf = (typeof Zone !== 'undefined' && Zone['__zone_symbol__requestAnimationFrame'])
+      || requestAnimationFrame.bind(window);
+    const _caf = (typeof Zone !== 'undefined' && Zone['__zone_symbol__cancelAnimationFrame'])
+      || cancelAnimationFrame.bind(window);
+    window._headBotCaf = _caf;
+
     let _rafId;
     const animate = () => {
-      _rafId = requestAnimationFrame(animate);
+      _rafId = _raf(animate);
       window._headBotRafId = _rafId;
       if (head) {
         const tY = Math.max(-1.2, Math.min(0.6,  mouseX * 1.5));
@@ -32617,6 +32625,20 @@ window.initHeadBot = function () {
       @media (min-width: 1400px) {
         .cgpvp-chat-window { width:400px; height:580px; }
       }
+      .cgpvp-options-container {
+        display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px;
+      }
+      .cgpvp-option-btn {
+        background: #fff; border: 1.5px solid #bfdbfe;
+        color: #1d4ed8; border-radius: 10px;
+        padding: 7px 14px; font-size: 12px; font-weight: 600;
+        cursor: pointer; transition: all 0.18s;
+        font-family: 'Inter', sans-serif;
+      }
+      .cgpvp-option-btn:hover:not(:disabled) {
+        background: #eff6ff; border-color: #2366CE;
+      }
+      .cgpvp-option-btn:disabled { cursor: not-allowed; }
     `;
  
     const styleSheet = document.createElement("style");
@@ -32695,11 +32717,13 @@ window.initHeadBot = function () {
       const redirectMap = {
         'atencion_cliente':   '/user/canalatencion',
         'recarga_saldo':      '/user/recargas',
+        'recarga_accion':     '/user/recargas',      // ← agrega
+        'reporte_accion':     '/user/canalatencion', // ← agrega
+        'noticias_accion':    '/user/noticias',      // ← agrega
         'metodos_pago':       '/user/recargas',
         'rutas':              '/user/verbuses',
         'estado_bus':         '/user/ubicacion',
         'ubicacion_paradero': '/user/ubicacion',
-        'informacion_general': '/user/noticias',
         'horarios':            '/user/noticias',
         'tarifas':             '/user/noticias',
         'app_problemas':       '/user/canalatencion',
@@ -32857,7 +32881,46 @@ window.initHeadBot = function () {
             </div>
           `;
         }
- 
+        
+        messagesEl.appendChild(wrap);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+      function addMessageWithButtons(mensaje, opciones, onSelect) {
+        const wrap = document.createElement("div");
+        wrap.className = "cgpvp-message cgpvp-message-bot";
+
+        // Formatear markdown básico
+        const formatted = mensaje.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, "<br>");
+
+        const botonesHtml = opciones.map((op, i) =>
+          `<button class="cgpvp-option-btn" data-index="${i}">${op.label}</button>`
+        ).join('');
+
+        wrap.innerHTML = `
+          <img src="Logo_CorredorAzul.png" alt="Bot" class="cgpvp-message-bot-avatar">
+          <div class="cgpvp-message-bot-content">
+            <p>${formatted}</p>
+            <div class="cgpvp-options-container">${botonesHtml}</div>
+          </div>
+        `;
+
+        // Evento click en cada botón
+        wrap.querySelectorAll('.cgpvp-option-btn').forEach((btn, i) => {
+          btn.addEventListener('click', () => {
+            // Deshabilitar todos los botones del mensaje
+            wrap.querySelectorAll('.cgpvp-option-btn').forEach(b => {
+              b.disabled = true;
+              b.style.opacity = '0.5';
+            });
+            // Marcar el seleccionado
+            btn.style.opacity = '1';
+            btn.style.background = 'linear-gradient(135deg,#1a3a8f,#2366CE)';
+            btn.style.color = 'white';
+            btn.style.borderColor = '#2366CE';
+            onSelect(opciones[i], i);
+          });
+        });
+
         messagesEl.appendChild(wrap);
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
@@ -32899,63 +32962,225 @@ window.initHeadBot = function () {
           .replace(/>/g,"&gt;")
           .replace(/"/g,"&quot;");
       }
- 
+      // ── Estado del flujo de recarga ──────────────────────────────
+      const recargaState = {
+        activo:        false,
+        id_tarjeta:    null,
+        monto:         null,
+        id_metodo:     null,
+        esperandoMonto: false   // true cuando el usuario debe escribir monto personalizado
+      };
+
+      async function recargaFlow(step, extraData = {}) {
+        const token = sessionStorage.getItem('auth_token') || '';
+
+        setInputDisabled(true);
+        setStatus(false);
+        showTyping();
+
+        try {
+          const resp = await fetch(`${CHATBOT_API_URL}/chat/recarga-flow`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ step, token, ...extraData })
+          });
+          const data = await resp.json();
+          hideTyping();
+
+          // STEP: elegir tarjeta
+          if (data.step_actual === 'elegir_tarjeta') {
+            recargaState.activo = true;
+            addMessageWithButtons(data.mensaje, data.opciones, (opcion) => {
+              recargaState.id_tarjeta = opcion.id;
+              addMessage(`Tarjeta #${opcion.id} seleccionada ✓`, true);
+              recargaFlow('elegir_monto', { id_tarjeta: opcion.id });
+            });
+          }
+
+          // STEP: elegir monto
+          else if (data.step_actual === 'elegir_monto') {
+            addMessageWithButtons(data.mensaje, data.opciones, (opcion) => {
+              if (opcion.action === 'monto_personalizado') {
+                recargaState.esperandoMonto = true;
+                addMessage('Escribe el monto personalizado ✓', true);
+                addMessage('Escribe el monto que deseas recargar (ej: 15):', false);
+                setInputDisabled(false);
+                inputEl.focus();
+              } else {
+                recargaState.monto = opcion.monto;
+                addMessage(`S/ ${opcion.monto.toFixed(2)} seleccionado ✓`, true);
+                recargaFlow('elegir_metodo', {
+                  id_tarjeta: recargaState.id_tarjeta,
+                  monto: opcion.monto
+                });
+              }
+            });
+          }
+
+          // STEP: elegir método de pago
+          else if (data.step_actual === 'elegir_metodo') {
+            addMessageWithButtons(data.mensaje, data.opciones, (opcion) => {
+              recargaState.id_metodo = opcion.id;
+              addMessage(`${opcion.label} seleccionado ✓`, true);
+              // Confirmar antes de ejecutar
+              addMessageWithButtons(
+                `¿Confirmas la recarga?\n\n💳 Tarjeta #${recargaState.id_tarjeta}\n💰 Monto: S/ ${recargaState.monto.toFixed(2)}\n📱 Método: ${opcion.label}`,
+                [
+                  { label: '✅ Sí, recargar', action: 'confirmar' },
+                  { label: '❌ Cancelar',     action: 'cancelar'  }
+                ],
+                (confirmacion) => {
+                  if (confirmacion.action === 'confirmar') {
+                    recargaFlow('confirmar', {
+                      id_tarjeta:     recargaState.id_tarjeta,
+                      monto:          recargaState.monto,
+                      id_metodo_pago: recargaState.id_metodo
+                    });
+                  } else {
+                    recargaState.activo        = false;
+                    recargaState.esperandoMonto = false;
+                    addMessage('Recarga cancelada. ¿En qué más puedo ayudarte?', false);
+                    setInputDisabled(false);
+                  }
+                }
+              );
+            });
+          }
+
+          // STEP: completado
+          else if (data.step_actual === 'completado') {
+            recargaState.activo        = false;
+            recargaState.esperandoMonto = false;
+            addMessage(data.mensaje, false);
+            speak(data.mensaje);
+            setInputDisabled(false);
+          }
+
+          // STEP: error
+          else if (data.step_actual === 'error') {
+            recargaState.activo        = false;
+            recargaState.esperandoMonto = false;
+            addMessage(data.mensaje, false);
+            setInputDisabled(false);
+          }
+
+        } catch (err) {
+          hideTyping();
+          console.error('[RecargaFlow]', err);
+          addMessage('Hubo un error en el proceso de recarga. Intenta más tarde.', false);
+          recargaState.activo        = false;
+          recargaState.esperandoMonto = false;
+          setInputDisabled(false);
+        } finally {
+          setStatus(true);
+        }
+      }
       // ── Envío de mensaje ─────────────────────────────────────
       async function sendMessage() {
         const message = inputEl.value.trim();
         if (!message) return;
- 
+
+        // ── Monto personalizado en flujo de recarga ──
+        if (recargaState.activo && recargaState.esperandoMonto) {
+          const monto = parseFloat(message.replace(',', '.'));
+          if (isNaN(monto) || monto < 2) {
+            addMessage(escapeHtml(message), true);
+            inputEl.value = '';
+            addMessage('El monto mínimo es S/ 2.00. Escribe un monto válido:', false);
+            return;
+          }
+          recargaState.monto         = monto;
+          recargaState.esperandoMonto = false;
+          addMessage(escapeHtml(message), true);
+          inputEl.value = '';
+          recargaFlow('elegir_metodo', {
+            id_tarjeta: recargaState.id_tarjeta,
+            monto
+          });
+          return;
+        }
+
         addMessage(escapeHtml(message), true);
         inputEl.value = "";
         setInputDisabled(true);
         setStatus(false);
         showTyping();
- 
+
+        const token = sessionStorage.getItem('auth_token') || '';
+
         try {
           const response = await fetch(`${CHATBOT_API_URL}/chat`, {
             method:  "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               message,
-              history: conversationHistory.slice(-6), // últimas 6 interacciones
+              history: conversationHistory.slice(-6),
+              token,
             }),
           });
- 
+
           if (!response.ok) {
             const err = await response.json().catch(() => ({}));
             throw new Error(err.detail || `HTTP ${response.status}`);
           }
- 
+
           const data = await response.json();
- 
-          // Guardar en historial para contexto multi-turno
-          conversationHistory.push({ role: "user",      content: message       });
-          conversationHistory.push({ role: "assistant", content: data.reply    });
- 
+
+          conversationHistory.push({ role: "user",      content: message    });
+          conversationHistory.push({ role: "assistant", content: data.reply });
+
           hideTyping();
+
+          // ── Si detecta recarga_accion → iniciar flujo ──
+          if (data.intent?.intent === 'recarga_accion') {
+            addMessage('Perfecto, vamos a hacer tu recarga 💳', false);
+            recargaFlow('elegir_tarjeta');
+            return;
+          }
+          // ── Si detecta noticias_accion → mostrar noticia real y redirigir ──
+          if (data.intent?.intent === 'noticias_accion') {
+            const formatted = data.reply
+              .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+              .replace(/\n/g, '<br>');
+            addMessage(formatted, false, data.intent);
+            speak(data.reply);
+            setTimeout(() => {
+              const lastBot = messagesEl.querySelectorAll('.cgpvp-message-bot-content');
+              const ultimo  = lastBot[lastBot.length - 1];
+              if (ultimo) {
+                const chip = document.createElement('span');
+                chip.className   = 'cgpvp-redirect-chip';
+                chip.textContent = '↗ Redirigiendo a 📰 Noticias...';
+                ultimo.appendChild(chip);
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+              }
+            }, 200);
+            if (typeof window.navegarA === 'function') {
+              setTimeout(() => window.navegarA('/user/noticias'), 1800);
+            }
+            return;
+          }
+
           addMessage(escapeHtml(data.reply), false, data.intent);
           speak(data.reply);
 
-          // ── Redirect por intención ───────────────────────────────
           const ruta = redirectMap[data.intent?.intent];
           if (ruta && typeof window.navegarA === 'function') {
             const label = redirectLabels[ruta] || ruta;
-            // Mostrar chip de redirección en el último mensaje
             setTimeout(() => {
               const lastBot = messagesEl.querySelectorAll('.cgpvp-message-bot-content');
-              const ultimo = lastBot[lastBot.length - 1];
+              const ultimo  = lastBot[lastBot.length - 1];
               if (ultimo) {
                 const chip = document.createElement('span');
-                chip.className = 'cgpvp-redirect-chip';
+                chip.className   = 'cgpvp-redirect-chip';
                 chip.textContent = `↗ Redirigiendo a ${label}...`;
                 ultimo.appendChild(chip);
                 messagesEl.scrollTop = messagesEl.scrollHeight;
               }
             }, 200);
-            // Navegar después de 1800ms
             setTimeout(() => window.navegarA(ruta), 1800);
           }
- 
+
         } catch (err) {
           hideTyping();
           console.error("[HeadBot] Error:", err);
@@ -33049,7 +33274,8 @@ window.destroyHeadBot = function () {
     window._headBotCurrentAudio = null;
   }
   if (window._headBotRafId) {
-    cancelAnimationFrame(window._headBotRafId);
+    const _caf = window._headBotCaf || cancelAnimationFrame;
+    _caf(window._headBotRafId);
     window._headBotRafId = null;
   }
   if (window._headBotMouseMoveHandler) {
