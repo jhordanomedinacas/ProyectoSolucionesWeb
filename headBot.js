@@ -32724,10 +32724,13 @@ window.initHeadBot = function () {
         'rutas':              '/user/verbuses',
         'estado_bus':         '/user/ubicacion',
         'ubicacion_paradero': '/user/ubicacion',
-        'horarios':            '/user/noticias',
-        'tarifas':             '/user/noticias',
+        'horarios':            '/user/verbuses',
         'app_problemas':       '/user/canalatencion',
         'tarjeta_problemas':   '/user/canalatencion',
+        'faq_accion':          '/user/faq',
+        'favoritos_accion':    '/rutas-favoritas',
+        'dashboard_accion':    '/dashboardu',
+        // 'tarifas' se responde directo por texto, sin redirigir
       };
 
       const redirectLabels = {
@@ -32736,6 +32739,9 @@ window.initHeadBot = function () {
         '/user/verbuses':      '🚌 Ver Buses',
         '/user/ubicacion':     '📍 Mi Ubicación',
         '/user/noticias':      '📰 Noticias',
+        '/user/faq':           '❓ Preguntas Frecuentes',
+        '/rutas-favoritas':    '⭐ Rutas Favoritas',
+        '/dashboardu':         '📊 Mi Dashboard',
       };
 
       // ── Speech-to-Text ───────────────────────────────────────────
